@@ -35,34 +35,43 @@ jobs:
       - name: Gradle előkészítése
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Projekt ellenőrzése
+      - name: Projekt megkeresése
+        id: project
         run: |
-          if [ ! -f ./gradlew ]; then
+          # A projekt lehet a repó gyökerében, vagy egy almappában (pl. Alapmuveletek/).
+          gradlew_path=$(find . -maxdepth 3 -name gradlew -not -path '*/node_modules/*' | head -1)
+
+          if [ -z "$gradlew_path" ]; then
             {
               echo "## Nincs még Android projekt a repóban"
               echo ""
-              echo "A repó gyökerében nem találom a \`gradlew\` fájlt."
+              echo "Nem találok \`gradlew\` fájlt a repóban."
               echo ""
-              echo "Ez a kiindulási állapot: hozd létre az Android Studio projektet **a repó mappájában**,"
-              echo "másold a helyére a kapott tesztfájlt, majd töltsd fel. A pontos lépések a README-ben vannak."
+              echo "Ez a kiindulási állapot: hozd létre az Android Studio projektet a repó mappájában,"
+              echo "másold a helyére a kapott tesztfájlt, majd töltsd fel. A lépések a README-ben vannak."
             } >> "$GITHUB_STEP_SUMMARY"
-            echo "::error::Nincs Android projekt a repó gyökerében (hiányzik a gradlew)."
+            echo "::error::Nincs Android projekt a repóban (nem találom a gradlew fájlt)."
             exit 1
           fi
 
+          dir=$(dirname "$gradlew_path")
+          echo "A projekt itt van: $dir"
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+
       - name: Fordítás és tesztek
+        working-directory: ${{ steps.project.outputs.dir }}
         run: |
           chmod +x ./gradlew
           ./gradlew ${{ inputs.gradle-tasks }} --stacktrace
 
       - name: Teszteredmények összefoglalója
-        if: always()
+        if: always() && steps.project.outputs.dir != ''
         run: |
           echo "## Eredmény" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
 
           shopt -s nullglob
-          reports=(app/build/test-results/*/TEST-*.xml)
+          reports=(${{ steps.project.outputs.dir }}/app/build/test-results/*/TEST-*.xml)
 
           if [ ${#reports[@]} -eq 0 ]; then
             echo "Nem futott le egyetlen teszt sem. Valószínűleg a fordítás hiúsult meg, a részletek a naplóban." >> "$GITHUB_STEP_SUMMARY"
@@ -87,11 +96,11 @@ jobs:
           done
 
       - name: Teszt-jelentés feltöltése
-        if: always()
+        if: always() && steps.project.outputs.dir != ''
         uses: actions/upload-artifact@v4
         with:
           name: teszt-jelentes
-          path: app/build/reports/tests/
+          path: ${{ steps.project.outputs.dir }}/app/build/reports/tests/
           if-no-files-found: ignore
           retention-days: 14
 
@@ -100,6 +109,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: app-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          path: ${{ steps.project.outputs.dir }}/app/build/outputs/apk/debug/*.apk
           if-no-files-found: warn
           retention-days: 14
