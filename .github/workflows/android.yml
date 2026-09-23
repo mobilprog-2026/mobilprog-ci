@@ -35,6 +35,21 @@ jobs:
       - name: Gradle előkészítése
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Projekt ellenőrzése
+        run: |
+          if [ ! -f ./gradlew ]; then
+            {
+              echo "## Nincs még Android projekt a repóban"
+              echo ""
+              echo "A repó gyökerében nem találom a \`gradlew\` fájlt."
+              echo ""
+              echo "Ez a kiindulási állapot: hozd létre az Android Studio projektet **a repó mappájában**,"
+              echo "másold a helyére a kapott tesztfájlt, majd töltsd fel. A pontos lépések a README-ben vannak."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::Nincs Android projekt a repó gyökerében (hiányzik a gradlew)."
+            exit 1
+          fi
+
       - name: Fordítás és tesztek
         run: |
           chmod +x ./gradlew
