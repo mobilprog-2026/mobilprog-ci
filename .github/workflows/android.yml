@@ -1,0 +1,90 @@
+name: Android ellenőrzés
+
+# Újrahasznosítható workflow a mobilprogramozás házi feladatokhoz.
+# A hallgatói repókban csak egy pár soros fájl hívja meg.
+
+on:
+  workflow_call:
+    inputs:
+      java-version:
+        description: 'JDK verzió'
+        type: string
+        default: '17'
+      gradle-tasks:
+        description: 'Futtatandó Gradle feladatok'
+        type: string
+        default: 'assembleDebug testDebugUnitTest'
+      upload-apk:
+        description: 'Feltöltse-e a lefordított APK-t artifactként'
+        type: boolean
+        default: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Kód letöltése
+        uses: actions/checkout@v4
+
+      - name: JDK telepítése
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: ${{ inputs.java-version }}
+
+      - name: Gradle előkészítése
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Fordítás és tesztek
+        run: |
+          chmod +x ./gradlew
+          ./gradlew ${{ inputs.gradle-tasks }} --stacktrace
+
+      - name: Teszteredmények összefoglalója
+        if: always()
+        run: |
+          echo "## Eredmény" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          shopt -s nullglob
+          reports=(app/build/test-results/*/TEST-*.xml)
+
+          if [ ${#reports[@]} -eq 0 ]; then
+            echo "Nem futott le egyetlen teszt sem. Valószínűleg a fordítás hiúsult meg, a részletek a naplóban." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          for f in "${reports[@]}"; do
+            name=$(basename "$f" .xml | sed 's/^TEST-//')
+            tests=$(grep -o 'tests="[0-9]*"' "$f" | head -1 | grep -o '[0-9]*')
+            failures=$(grep -o 'failures="[0-9]*"' "$f" | head -1 | grep -o '[0-9]*')
+            errors=$(grep -o 'errors="[0-9]*"' "$f" | head -1 | grep -o '[0-9]*')
+            bad=$(( ${failures:-0} + ${errors:-0} ))
+
+            if [ "$bad" -eq 0 ]; then
+              echo "- ✅ **$name** – ${tests:-0} teszt" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "- ❌ **$name** – ${tests:-0} tesztből $bad sikertelen" >> "$GITHUB_STEP_SUMMARY"
+              grep -o '<testcase name="[^"]*"[^>]*>[[:space:]]*<failure[^>]*message="[^"]*"' "$f" \
+                | sed -E 's/.*<testcase name="([^"]*)".*message="([^"]*)".*/    - `\1`: \2/' \
+                >> "$GITHUB_STEP_SUMMARY" || true
+            fi
+          done
+
+      - name: Teszt-jelentés feltöltése
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: teszt-jelentes
+          path: app/build/reports/tests/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: APK feltöltése
+        if: inputs.upload-apk && success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: warn
+          retention-days: 14
